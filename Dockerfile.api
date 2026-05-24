@@ -1,0 +1,52 @@
+# Multi-stage build for ClearPath API
+# --- BUILD STAGE ---
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy dependency configuration files
+COPY package*.json ./
+
+# Install all dependencies including devDependencies for build
+RUN npm ci
+
+# Copy full application codebase
+COPY . .
+
+# Run the typescript/app bundle compiling step
+RUN npm run build
+
+# --- PRODUCTION STAGE ---
+FROM node:20-alpine
+
+# Set secure environment context
+ENV NODE_ENV=production
+ENV PORT=3000
+
+WORKDIR /app
+
+# Copy production files and build outputs
+COPY package*.json ./
+
+# Install only hardened production level packages
+RUN npm ci --only=production
+
+# Copy compiled application resources
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/src/migrations ./src/migrations
+
+# Install curl in alpine for container healthchecks
+RUN apk add --no-cache curl
+
+# Expose internal API listening port
+EXPOSE 3000
+
+# Downgrade privileges to standard non-root node system profile
+USER node
+
+# Health check setup querying database status ping endpoint
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
+
+# Execute service entry point
+CMD ["node", "dist/server.cjs"]

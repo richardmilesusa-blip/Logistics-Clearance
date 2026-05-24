@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # 1. Primary API Backend Service
+  clearpath-api:
+    container_name: clearpath-api
+    build:
+      context: . # Dev environment utilizes current project root; maps to `./api` in compartmentalized structures
+      dockerfile: Dockerfile.api
+    restart: always
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-clearpath_admin}:${POSTGRES_PASSWORD:-clearpath_secure_pass123}@postgres:5432/${POSTGRES_DB:-clearpath_db}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # 2. Frontend Client Reverse-Proxy Web Server
+  clearpath-frontend:
+    container_name: clearpath-frontend
+    build:
+      context: . # Maps to `./frontend` in compartmentalized source trees
+      dockerfile: Dockerfile.frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - clearpath-api
+
+  # 3. Secure Relational Datastore Engine
+  postgres:
+    image: postgres:16-alpine
+    container_name: clearpath-db
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-clearpath_db}
+      POSTGRES_USER: ${POSTGRES_USER:-clearpath_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-clearpath_secure_pass123}
+    volumes:
+      - clearpath_db:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-clearpath_admin} -d ${POSTGRES_DB:-clearpath_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 4. Optional Graphical Administrative Explorer
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: clearpath-pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@clearpath.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-AdminSecurePass2026!}
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+
+volumes:
+  clearpath_db:
+    driver: local
+  pgadmin_data:
+    driver: local

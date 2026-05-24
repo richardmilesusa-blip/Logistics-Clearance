@@ -1,0 +1,136 @@
+name: ClearPath CI/CD Delivery Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # Job 1: Automated Unit, Integration, and Endpoint Tests
+  test:
+    name: Run Test Suites
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Runtime (v20)
+        uses: actions/setup-node@v4
+        with:
+          node-size: '20'
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Schema Linter Checks
+        run: npm run lint
+
+      - name: Execute Jest + Supertest Suites
+        env:
+          NODE_ENV: test
+          JWT_SECRET: test-jwt-secret-key-123456
+          # A transient PostgreSQL service container could also be set up using service containers in GitHub Actions
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/clearpath_test
+        run: |
+          # Start a background temporary postgres instance for the test job runner
+          docker run --name test-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=clearpath_test -p 5432:5432 -d postgres:16-alpine
+          # Wait until pg is ready
+          until docker exec test-postgres pg_isready -U postgres; do
+            sleep 1
+          done
+          # Execute the validation and endpoint tests
+          npm run test
+
+  # Job 2: Compile & Publish Production Docker Images to GHCR
+  build-and-push:
+    name: Dockerize & Publish Images
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+      API_IMAGE_NAME: ${{ github.repository }}/clearpath-api
+      FRONTEND_IMAGE_NAME: ${{ github.repository }}/clearpath-frontend
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup QEMU for Multiplatform Builds
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Docker Buildx Engine
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Downcase Image Repositories
+        run: |
+          echo "API_IMAGE_LOWER=$(echo '${{ env.API_IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "FRONT_IMAGE_LOWER=$(echo '${{ env.FRONTEND_IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      # Build and Push Backend API Image
+      - name: Build and Push ClearPath API Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.api
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.API_IMAGE_LOWER }}:latest
+            ${{ env.REGISTRY }}/${{ env.API_IMAGE_LOWER }}:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Build and Push Frontend SPA Image
+      - name: Build and Push ClearPath Frontend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.frontend
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.FRONT_IMAGE_LOWER }}:latest
+            ${{ env.REGISTRY }}/${{ env.FRONT_IMAGE_LOWER }}:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Job 3: Secure Remote Connection & Live Orchestrated Deployment
+  deploy:
+    name: Deploy to Production VM
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Remote SSH Commands & Update Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            cd /opt/clearpath-saas
+            
+            # Authenticate server shell to GitHub Container Registry
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # Retrieve latest images
+            docker compose pull
+            
+            # Perform zero-downtime rolling recreation of systems
+            docker compose up -d --no-build
+            
+            # Trigger idempotent database schema migrations inside live API container
+            docker compose exec -T clearpath-api node src/migrations/run.js
+            
+            # Clean up dangling images to save server drive space
+            docker image prune -f

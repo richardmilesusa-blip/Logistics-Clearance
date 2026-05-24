@@ -1,0 +1,32 @@
+# Multi-stage build for ClearPath Frontend
+# --- BUILD STAGE ---
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy dependency configs
+COPY package*.json ./
+
+# Install full dependencies
+RUN npm ci
+
+# Copy raw UI source codes
+COPY . .
+
+# Compile static bundles (produced output written in /dist)
+RUN npm run build
+
+# --- SERVING STAGE ---
+FROM nginx:alpine
+
+# Copy static builds to server public asset locator path
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Replace default nginx config with our optimal proxy configuration
+COPY nginx.conf /etc/nginx/nginx.conf
+
+# Expose HTTP port 80
+EXPOSE 80
+
+# Run nginx in foreground block for container lifecycle tracking
+CMD ["nginx", "-g", "daemon off;"]
