@@ -108,6 +108,7 @@ export default function JobCreatePage() {
     getValues,
     formState: { errors, isValid },
     trigger,
+    control,
   } = useForm<any>({
     resolver: zodResolver(jobCreateSchema),
     mode: 'onChange',
@@ -243,9 +244,9 @@ export default function JobCreatePage() {
   const filteredForwarders = forwarders.filter(f => f.name.toLowerCase().includes(forwarderSearch.toLowerCase()));
 
   // Setup current values watchers
-  const watchedClientId = useWatch({ name: 'client_id' });
-  const watchedBrokerId = useWatch({ name: 'assigned_broker_id' });
-  const watchedForwarderId = useWatch({ name: 'assigned_forwarder_id' });
+  const watchedClientId = useWatch({ control, name: 'client_id' });
+  const watchedBrokerId = useWatch({ control, name: 'assigned_broker_id' });
+  const watchedForwarderId = useWatch({ control, name: 'assigned_forwarder_id' });
 
   const activeClientLabel = clients.find(c => c.id === watchedClientId)?.name || 'Select registered client';
   const activeBrokerLabel = brokers.find(b => b.id === watchedBrokerId)?.name || 'Select Customs Broker';

@@ -263,7 +263,7 @@ router.get(
 router.get(
   '/dashboard',
   verifyJwt,
-  requireRole('senior_admin'),
+  requireRole('customs_broker', 'freight_forwarder', 'senior_admin', 'viewer'),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       // 1. total_outstanding_ngn = Custom duty charges yet unpaid

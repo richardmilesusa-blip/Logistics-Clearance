@@ -66,6 +66,7 @@ app.use('/health', healthRouter);
 app.use('/api/health', healthRouter);
 
 // B. Base API V1 Route Mounts (Routers are placeholder empty express.Routers for now)
+import authRouter from './routes/auth';
 import jobsRouter from './routes/jobs';
 import dutyAssessmentsRouter from './routes/dutyAssessments';
 import notificationsRouter from './routes/notifications';
@@ -86,6 +87,7 @@ baseRouter.get('/', (req, res) => {
 
 // Mount V1 API
 app.use('/api', baseRouter);
+app.use('/api/auth', authRouter);
 app.use('/api/jobs', jobsRouter);
 app.use('/api/jobs', dutyAssessmentsRouter);
 app.use('/api/notifications', notificationsRouter);

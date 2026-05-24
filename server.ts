@@ -19,6 +19,14 @@ const serverLogger = winston.createLogger({
 async function startServer() {
   const PORT = 3000;
 
+  // Boot standard database schema initializing/seeding rules
+  try {
+    const { dbInit } = await import('./src/config/dbInit');
+    await dbInit();
+  } catch (dbError: any) {
+    serverLogger.error('Failed database pre-flight bootstrap sequence', { error: dbError.message });
+  }
+
   // Initialize and start standard hourly Node-Cron alert engines
   initializeScheduledJobs();
 
